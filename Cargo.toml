@@ -1,0 +1,22 @@
+[package]
+name = "taproot-vanity"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+secp256k1 = { version = "0.28", features = ["rand", "global-context"] }
+bitcoin = { version = "0.31", features = ["rand"] }
+bech32 = "0.11"
+rand = "0.8"
+rayon = "1.8"
+clap = { version = "4.4", features = ["derive"] }
+indicatif = "0.17"
+crossbeam = "0.8"
+num_cpus = "1.16"
+chrono = { version = "0.4", features = ["serde"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
