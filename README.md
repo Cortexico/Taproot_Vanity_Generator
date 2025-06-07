@@ -1,34 +1,46 @@
-# Taproot KEK Hunter
+# Taproot KEK Hunter (bc1pkek Prefix)
 
-Ultra-fast Taproot vanity address generator specifically designed to find Bitcoin addresses containing multiple "kek" patterns.
+Ultra-fast Taproot vanity address generator specifically designed to find Bitcoin addresses that start with "bc1pkek" and contain additional "kek" patterns.
 
 ## Features
 
 - 🚀 **Ultra-fast multi-threaded generation** using all CPU cores
-- 🎯 **Finds addresses with multiple "kek" occurrences** (minimum 2 by default)
+- 🎯 **Finds bc1pkek addresses** with configurable total "kek" count (minimum 1 by default)
 - 📝 **Continuous logging** of found addresses to file
 - ⚡ **Optimized for speed** with batch processing and efficient string matching
 - 🛑 **Graceful shutdown** with Ctrl+C handling
 - 📊 **Real-time progress monitoring** with attempts/second and found count
 
-## What Changed
+## What This Does
 
-This is a modified version of the original Taproot Vanity Generator with the following key changes:
+This generator specifically targets Bitcoin Taproot addresses that:
 
-1. **Target Pattern**: Instead of prefix/suffix matching, it now searches for multiple "kek" occurrences anywhere in the address
-2. **Continuous Operation**: Runs indefinitely until stopped, logging each qualifying address
-3. **Multiple Results**: Finds and logs ALL addresses with the required kek count (not just the first one)
-4. **Optimized Performance**: Increased batch sizes and more efficient string searching
-5. **Better Logging**: Immediate file writing with flush for real-time results
+1. **Start with "bc1pkek"** - All addresses must have this exact prefix
+2. **Count total "kek" occurrences** - Counts the prefix "kek" plus any additional "kek" patterns in the address
+3. **Continuous Operation** - Runs indefinitely until stopped, logging each qualifying address
+4. **Multiple Results** - Finds and logs ALL addresses with the required kek count (not just the first one)
+5. **Optimized Performance** - Increased batch sizes and more efficient string searching
+6. **Better Logging** - Immediate file writing with flush for real-time results
+
+### Examples:
+- `bc1pkek...` = 1 kek count (just the prefix)
+- `bc1pkekkek...` = 2 kek count (prefix + one additional)
+- `bc1pkekabckek...` = 2 kek count (prefix + one additional)
+- `bc1pkekkekkek...` = 3 kek count (prefix + two additional)
 
 ## Usage
 
-### Basic Usage (Find addresses with 2+ "kek" patterns)
+### Basic Usage (Find bc1pkek addresses with 1+ total "kek" patterns)
 ```bash
 ./taproot-vanity.exe
 ```
 
-### Find addresses with 3+ "kek" patterns
+### Find bc1pkek addresses with 2+ total "kek" patterns
+```bash
+./taproot-vanity.exe --min-kek-count 2
+```
+
+### Find bc1pkek addresses with 3+ total "kek" patterns
 ```bash
 ./taproot-vanity.exe --min-kek-count 3
 ```
@@ -50,7 +62,7 @@ This is a modified version of the original Taproot Vanity Generator with the fol
 
 ## Command Line Options
 
-- `-m, --min-kek-count <COUNT>`: Minimum number of 'kek' occurrences required (default: 2)
+- `-m, --min-kek-count <COUNT>`: Minimum number of total 'kek' occurrences required (default: 1, includes prefix)
 - `-w, --workers <WORKERS>`: Number of worker threads (default: CPU cores)
 - `-o, --output-file <FILE>`: Output file for results (default: kek_addresses.txt)
 - `--case-sensitive`: Enable case-sensitive matching
@@ -68,9 +80,9 @@ Example output:
 ```
 🎯 KEK ADDRESS #1 FOUND! 🎯
 Timestamp: 2024-01-15 10:30:45 UTC
-Address: bc1pkekabckekdefkekghijklmnopqrstuvwxyz
+Address: bc1pkekabckekdefghijklmnopqrstuvwxyz
 Private Key: L1234567890abcdef...
-KEK Count: 3
+KEK Count: 2
 Found by Worker: #2
 ======================================================================
 ```
@@ -126,10 +138,12 @@ Press `Ctrl+C` to gracefully stop the search. All found addresses will be saved 
 
 ## Difficulty Estimation
 
-The difficulty increases exponentially with the number of required "kek" patterns:
-- 2 keks: ~1 in 32,768 addresses
-- 3 keks: ~1 in 1,048,576 addresses  
-- 4 keks: ~1 in 33,554,432 addresses
+The difficulty for bc1pkek addresses increases with additional "kek" patterns:
+- 1 kek (bc1pkek only): ~1 in 32,768 addresses
+- 2 keks (bc1pkek + 1 more): ~1 in 1,073,741,824 addresses
+- 3 keks (bc1pkek + 2 more): ~1 in 34,359,738,368 addresses
+
+Note: The base difficulty is finding "bc1pkek" (~32K attempts), then each additional "kek" multiplies the difficulty significantly.
 
 ## Security Note
 

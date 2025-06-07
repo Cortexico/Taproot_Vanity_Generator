@@ -12,10 +12,10 @@ use std::io::Write;
 
 #[derive(Parser)]
 #[command(name = "taproot-vanity")]
-#[command(about = "Ultra-fast Taproot vanity address generator for multiple 'kek' patterns")]
+#[command(about = "Ultra-fast Taproot vanity address generator for 'bc1pkek' prefix with additional 'kek' patterns")]
 struct Args {
-    /// Minimum number of 'kek' occurrences required (default: 2)
-    #[arg(short, long, default_value = "2")]
+    /// Minimum number of 'kek' occurrences required (default: 1, includes the prefix kek)
+    #[arg(short, long, default_value = "1")]
     min_kek_count: usize,
 
     /// Number of worker threads (default: CPU cores)
@@ -41,16 +41,16 @@ struct VanityResult {
 fn main() {
     let args = Args::parse();
 
-    if args.min_kek_count < 2 {
-        eprintln!("❌ Minimum kek count must be at least 2!");
+    if args.min_kek_count < 1 {
+        eprintln!("❌ Minimum kek count must be at least 1!");
         std::process::exit(1);
     }
 
     let workers = args.workers.unwrap_or_else(num_cpus::get);
 
-    println!("🎯 ULTRA-FAST TAPROOT KEK HUNTER");
-    println!("=================================");
-    println!("Target: Addresses with {} or more 'kek' occurrences", args.min_kek_count);
+    println!("🎯 ULTRA-FAST TAPROOT KEK HUNTER (bc1pkek PREFIX)");
+    println!("=================================================");
+    println!("Target: bc1pkek addresses with {} or more total 'kek' occurrences", args.min_kek_count);
     println!("Workers: {}", workers);
     println!("Case sensitive: {}", args.case_sensitive);
     println!("Output file: {}", args.output_file);
@@ -129,7 +129,7 @@ fn main() {
     });
 
     // Keep running until Ctrl+C
-    println!("🔍 Searching for addresses with multiple 'kek' patterns...");
+    println!("🔍 Searching for bc1pkek addresses with {} or more total 'kek' patterns...", args.min_kek_count);
     println!("Press Ctrl+C to stop");
 
     // Set up Ctrl+C handler
@@ -174,8 +174,8 @@ fn worker_thread(
                 total_attempts.fetch_add(5000, Ordering::Relaxed);
             }
 
-            // Check if it has enough 'kek' occurrences
-            if let Some(kek_count) = count_kek_occurrences(&address, case_sensitive) {
+            // Check if it starts with bc1pkek and has enough total 'kek' occurrences
+            if let Some(kek_count) = count_bc1pkek_occurrences(&address, case_sensitive) {
                 if kek_count >= min_kek_count {
                     let result = VanityResult {
                         address,
@@ -201,16 +201,17 @@ fn generate_taproot_address(secp: &Secp256k1<bitcoin::secp256k1::All>, secret_ke
     Ok(address.to_string())
 }
 
-fn count_kek_occurrences(address: &str, case_sensitive: bool) -> Option<usize> {
-    if !address.starts_with("bc1p") {
+fn count_bc1pkek_occurrences(address: &str, case_sensitive: bool) -> Option<usize> {
+    // Must start with "bc1pkek"
+    if !address.starts_with("bc1pkek") {
         return None;
     }
 
-    let addr_body = &address[4..]; // Remove "bc1p"
+    // Count total "kek" occurrences in the entire address (including the prefix)
     let search_text = if case_sensitive {
-        addr_body.to_string()
+        address.to_string()
     } else {
-        addr_body.to_lowercase()
+        address.to_lowercase()
     };
 
     let pattern = if case_sensitive { "kek" } else { "kek" };
@@ -245,10 +246,17 @@ fn format_number(n: u64) -> String {
 fn estimate_kek_difficulty(min_kek_count: usize) -> u64 {
     let charset_size = 32u64; // bech32 charset
 
-    // For multiple keks, the probability decreases exponentially
-    let difficulty = (charset_size.pow(3 * min_kek_count as u32)) as u64;
+    // Base difficulty for bc1pkek prefix (3 characters after bc1p)
+    let base_difficulty = charset_size.pow(3); // ~32,768 for "kek"
 
-    difficulty.max(1_000_000) // Minimum reasonable difficulty
+    // Additional difficulty for extra keks beyond the first one
+    if min_kek_count <= 1 {
+        base_difficulty
+    } else {
+        let extra_keks = min_kek_count - 1;
+        let extra_difficulty = charset_size.pow(3 * extra_keks as u32);
+        base_difficulty * extra_difficulty
+    }
 }
 
 fn save_kek_result(result: &VanityResult, output_file: &str, found_count: u64) {
