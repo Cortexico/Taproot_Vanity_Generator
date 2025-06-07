@@ -7,23 +7,25 @@ use std::time::{Duration, Instant};
 use crossbeam::channel;
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
+use std::fs::OpenOptions;
+use std::io::Write;
 
 #[derive(Parser)]
 #[command(name = "taproot-vanity")]
-#[command(about = "Ultra-fast Taproot vanity address generator")]
+#[command(about = "Ultra-fast Taproot vanity address generator for multiple 'kek' patterns")]
 struct Args {
-    /// Desired prefix (after bc1p)
-    #[arg(short, long)]
-    prefix: Option<String>,
-    
-    /// Desired suffix
-    #[arg(short, long)]
-    suffix: Option<String>,
-    
+    /// Minimum number of 'kek' occurrences required (default: 2)
+    #[arg(short, long, default_value = "2")]
+    min_kek_count: usize,
+
     /// Number of worker threads (default: CPU cores)
     #[arg(short, long)]
     workers: Option<usize>,
-    
+
+    /// Output file for results (default: kek_addresses.txt)
+    #[arg(short, long, default_value = "kek_addresses.txt")]
+    output_file: String,
+
     /// Case sensitive matching
     #[arg(long)]
     case_sensitive: bool,
@@ -32,41 +34,40 @@ struct Args {
 struct VanityResult {
     address: String,
     private_key: String,
-    attempts: u64,
+    kek_count: usize,
     worker_id: usize,
 }
 
 fn main() {
     let args = Args::parse();
-    
-    if args.prefix.is_none() && args.suffix.is_none() {
-        eprintln!("❌ You must specify at least a prefix or suffix!");
+
+    if args.min_kek_count < 2 {
+        eprintln!("❌ Minimum kek count must be at least 2!");
         std::process::exit(1);
     }
-    
-    let prefix = args.prefix.unwrap_or_default();
-    let suffix = args.suffix.unwrap_or_default();
+
     let workers = args.workers.unwrap_or_else(num_cpus::get);
-    
-    println!("🎯 ULTRA-FAST TAPROOT VANITY GENERATOR");
-    println!("=====================================");
-    println!("Prefix: '{}'", prefix);
-    println!("Suffix: '{}'", suffix);
+
+    println!("🎯 ULTRA-FAST TAPROOT KEK HUNTER");
+    println!("=================================");
+    println!("Target: Addresses with {} or more 'kek' occurrences", args.min_kek_count);
     println!("Workers: {}", workers);
     println!("Case sensitive: {}", args.case_sensitive);
+    println!("Output file: {}", args.output_file);
     println!();
-    
-    let difficulty = estimate_difficulty(&prefix, &suffix);
+
+    let difficulty = estimate_kek_difficulty(args.min_kek_count);
     println!("Estimated difficulty: 1 in {}", format_number(difficulty));
-    println!("Expected attempts: ~{}", format_number(difficulty / 2));
+    println!("Expected attempts per find: ~{}", format_number(difficulty / 2));
+    println!("Press Ctrl+C to stop the search");
     println!();
     
-    let found = Arc::new(AtomicBool::new(false));
     let total_attempts = Arc::new(AtomicU64::new(0));
+    let total_found = Arc::new(AtomicU64::new(0));
     let (tx, rx) = channel::unbounded();
-    
+
     let start_time = Instant::now();
-    
+
     // Progress bar
     let pb = ProgressBar::new_spinner();
     pb.set_style(
@@ -74,19 +75,17 @@ fn main() {
             .template("{spinner:.green} [{elapsed_precise}] {msg}")
             .unwrap()
     );
-    
+
     // Spawn worker threads
-    let handles: Vec<_> = (0..workers)
+    let _handles: Vec<_> = (0..workers)
         .map(|worker_id| {
-            let prefix = prefix.clone();
-            let suffix = suffix.clone();
-            let found = Arc::clone(&found);
             let total_attempts = Arc::clone(&total_attempts);
             let tx = tx.clone();
+            let min_kek_count = args.min_kek_count;
             let case_sensitive = args.case_sensitive;
-            
+
             std::thread::spawn(move || {
-                worker_thread(worker_id, prefix, suffix, case_sensitive, found, total_attempts, tx)
+                worker_thread(worker_id, min_kek_count, case_sensitive, total_attempts, tx)
             })
         })
         .collect();
@@ -94,87 +93,100 @@ fn main() {
     // Progress monitoring
     let pb_clone = pb.clone();
     let total_attempts_clone = Arc::clone(&total_attempts);
-    let found_clone = Arc::clone(&found);
-    let progress_handle = std::thread::spawn(move || {
-        while !found_clone.load(Ordering::Relaxed) {
+    let total_found_clone = Arc::clone(&total_found);
+    let _progress_handle = std::thread::spawn(move || {
+        loop {
             let attempts = total_attempts_clone.load(Ordering::Relaxed);
+            let found_count = total_found_clone.load(Ordering::Relaxed);
             let elapsed = start_time.elapsed().as_secs_f64();
             let rate = if elapsed > 0.0 { attempts as f64 / elapsed } else { 0.0 };
 
             pb_clone.set_message(format!(
-                "Attempts: {} | Rate: {:.0}/s | Elapsed: {:.1}s",
-                format_number(attempts), rate, elapsed
+                "Attempts: {} | Rate: {:.0}/s | Found: {} | Elapsed: {:.1}s",
+                format_number(attempts), rate, found_count, elapsed
             ));
 
             std::thread::sleep(Duration::from_millis(100));
         }
     });
 
-    // Wait for result
-    if let Ok(result) = rx.recv() {
-        found.store(true, Ordering::Relaxed);
-        pb.finish_with_message("Found!");
-        
-        let elapsed = start_time.elapsed();
-        let total_attempts = total_attempts.load(Ordering::Relaxed);
-        
-        println!("\n🎉 SUCCESS! Found matching address!");
-        println!("   Address: {}", result.address);
-        println!("   Private Key: {}", result.private_key);
-        println!("   Total Attempts: {}", format_number(total_attempts));
-        println!("   Time: {:.2}s", elapsed.as_secs_f64());
-        println!("   Rate: {:.0}/s", total_attempts as f64 / elapsed.as_secs_f64());
-        println!("   Found by Worker: #{}", result.worker_id);
-        
-        // Save result
-        save_result(&result, &prefix, &suffix, total_attempts, elapsed);
+    // Handle results continuously
+    let output_file = args.output_file.clone();
+    let _result_handle = std::thread::spawn(move || {
+        while let Ok(result) = rx.recv() {
+            total_found.fetch_add(1, Ordering::Relaxed);
+            let found_count = total_found.load(Ordering::Relaxed);
+
+            println!("\n🎉 KEK ADDRESS #{} FOUND!", found_count);
+            println!("   Address: {}", result.address);
+            println!("   Private Key: {}", result.private_key);
+            println!("   KEK Count: {}", result.kek_count);
+            println!("   Found by Worker: #{}", result.worker_id);
+
+            // Save result immediately
+            save_kek_result(&result, &output_file, found_count);
+        }
+    });
+
+    // Keep running until Ctrl+C
+    println!("🔍 Searching for addresses with multiple 'kek' patterns...");
+    println!("Press Ctrl+C to stop");
+
+    // Set up Ctrl+C handler
+    let running = Arc::new(AtomicBool::new(true));
+    let running_clone = Arc::clone(&running);
+
+    ctrlc::set_handler(move || {
+        println!("\n🛑 Received Ctrl+C, stopping search...");
+        running_clone.store(false, Ordering::Relaxed);
+    }).expect("Error setting Ctrl+C handler");
+
+    // Wait for Ctrl+C or result handler to finish
+    while running.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_millis(100));
     }
-    
-    // Clean up
-    for handle in handles {
-        let _ = handle.join();
-    }
-    let _ = progress_handle.join();
+
+    println!("Search stopped. Check {} for results.", args.output_file);
 }
 
 fn worker_thread(
     worker_id: usize,
-    prefix: String,
-    suffix: String,
+    min_kek_count: usize,
     case_sensitive: bool,
-    found: Arc<AtomicBool>,
     total_attempts: Arc<AtomicU64>,
     tx: channel::Sender<VanityResult>,
 ) {
     let secp = Secp256k1::new();
     let mut rng = rand::thread_rng();
     let mut local_attempts = 0u64;
-    
-    while !found.load(Ordering::Relaxed) {
+
+    loop {
         // Generate random private key
         let secret_key = SecretKey::new(&mut rng);
         let private_key = PrivateKey::new(secret_key, Network::Bitcoin);
-        
+
         // Generate Taproot address
         if let Ok(address) = generate_taproot_address(&secp, &secret_key) {
             local_attempts += 1;
-            
-            // Update global counter every 1000 attempts for performance
-            if local_attempts % 1000 == 0 {
-                total_attempts.fetch_add(1000, Ordering::Relaxed);
+
+            // Update global counter every 5000 attempts for better performance
+            if local_attempts % 5000 == 0 {
+                total_attempts.fetch_add(5000, Ordering::Relaxed);
             }
-            
-            // Check if it matches our pattern
-            if matches_pattern(&address, &prefix, &suffix, case_sensitive) {
-                let result = VanityResult {
-                    address,
-                    private_key: private_key.to_wif(),
-                    attempts: local_attempts,
-                    worker_id,
-                };
-                
-                let _ = tx.send(result);
-                return;
+
+            // Check if it has enough 'kek' occurrences
+            if let Some(kek_count) = count_kek_occurrences(&address, case_sensitive) {
+                if kek_count >= min_kek_count {
+                    let result = VanityResult {
+                        address,
+                        private_key: private_key.to_wif(),
+                        kek_count,
+                        worker_id,
+                    };
+
+                    let _ = tx.send(result);
+                    // Continue searching for more addresses
+                }
             }
         }
     }
@@ -189,19 +201,30 @@ fn generate_taproot_address(secp: &Secp256k1<bitcoin::secp256k1::All>, secret_ke
     Ok(address.to_string())
 }
 
-fn matches_pattern(address: &str, prefix: &str, suffix: &str, case_sensitive: bool) -> bool {
+fn count_kek_occurrences(address: &str, case_sensitive: bool) -> Option<usize> {
     if !address.starts_with("bc1p") {
-        return false;
+        return None;
     }
-    
+
     let addr_body = &address[4..]; // Remove "bc1p"
-    
-    if case_sensitive {
-        addr_body.starts_with(prefix) && addr_body.ends_with(suffix)
+    let search_text = if case_sensitive {
+        addr_body.to_string()
     } else {
-        addr_body.to_lowercase().starts_with(&prefix.to_lowercase()) &&
-        addr_body.to_lowercase().ends_with(&suffix.to_lowercase())
+        addr_body.to_lowercase()
+    };
+
+    let pattern = if case_sensitive { "kek" } else { "kek" };
+
+    // Count non-overlapping occurrences of "kek"
+    let mut count = 0;
+    let mut start = 0;
+
+    while let Some(pos) = search_text[start..].find(pattern) {
+        count += 1;
+        start += pos + pattern.len();
     }
+
+    Some(count)
 }
 
 fn format_number(n: u64) -> String {
@@ -219,40 +242,31 @@ fn format_number(n: u64) -> String {
     result
 }
 
-fn estimate_difficulty(prefix: &str, suffix: &str) -> u64 {
+fn estimate_kek_difficulty(min_kek_count: usize) -> u64 {
     let charset_size = 32u64; // bech32 charset
-    let mut difficulty = 1u64;
-    
-    if !prefix.is_empty() {
-        difficulty = difficulty.saturating_mul(charset_size.saturating_pow(prefix.len() as u32));
-    }
-    if !suffix.is_empty() {
-        difficulty = difficulty.saturating_mul(charset_size.saturating_pow(suffix.len() as u32));
-    }
-    
-    difficulty
+
+    // For multiple keks, the probability decreases exponentially
+    let difficulty = (charset_size.pow(3 * min_kek_count as u32)) as u64;
+
+    difficulty.max(1_000_000) // Minimum reasonable difficulty
 }
 
-fn save_result(result: &VanityResult, prefix: &str, suffix: &str, total_attempts: u64, elapsed: Duration) {
-    use std::fs::OpenOptions;
-    use std::io::Write;
-    
+fn save_kek_result(result: &VanityResult, output_file: &str, found_count: u64) {
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open("taproot_vanity_results.txt")
+        .open(output_file)
         .unwrap();
-    
-    writeln!(file, "🎯 TAPROOT VANITY ADDRESS FOUND! 🎯").unwrap();
+
+    writeln!(file, "🎯 KEK ADDRESS #{} FOUND! 🎯", found_count).unwrap();
     writeln!(file, "Timestamp: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")).unwrap();
     writeln!(file, "Address: {}", result.address).unwrap();
     writeln!(file, "Private Key: {}", result.private_key).unwrap();
-    writeln!(file, "Prefix: '{}'", prefix).unwrap();
-    writeln!(file, "Suffix: '{}'", suffix).unwrap();
-    writeln!(file, "Total Attempts: {}", format_number(total_attempts)).unwrap();
-    writeln!(file, "Time: {:.2}s", elapsed.as_secs_f64()).unwrap();
-    writeln!(file, "Rate: {:.0}/s", total_attempts as f64 / elapsed.as_secs_f64()).unwrap();
+    writeln!(file, "KEK Count: {}", result.kek_count).unwrap();
     writeln!(file, "Found by Worker: #{}", result.worker_id).unwrap();
     writeln!(file, "{}", "=".repeat(70)).unwrap();
     writeln!(file).unwrap();
+
+    // Flush to ensure immediate write
+    let _ = file.flush();
 }
