@@ -22,13 +22,14 @@ if [ $? -eq 0 ]; then
     echo "📁 Executable location: target/release/taproot-vanity"
     echo
     echo "🚀 Usage examples:"
-    echo "  ./target/release/taproot-vanity --prefix abc"
-    echo "  ./target/release/taproot-vanity --suffix xyz"
-    echo "  ./target/release/taproot-vanity --prefix abc --suffix xyz"
-    echo "  ./target/release/taproot-vanity --prefix abc --workers 16"
+    echo "  ./target/release/taproot-vanity"
+    echo "  ./target/release/taproot-vanity --min-kek-count 3"
+    echo "  ./target/release/taproot-vanity --workers 16"
+    echo "  ./target/release/taproot-vanity --output-file my_kek_addresses.txt"
+    echo "  ./target/release/taproot-vanity --case-sensitive"
     echo
     echo "💡 For maximum performance, use all CPU cores:"
-    echo "  ./target/release/taproot-vanity --prefix abc --workers $(nproc)"
+    echo "  ./target/release/taproot-vanity --workers $(nproc)"
     echo
 else
     echo "❌ Build failed!"

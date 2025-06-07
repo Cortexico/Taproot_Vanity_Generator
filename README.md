@@ -81,6 +81,33 @@ Found by Worker: #2
 - **Optimized**: Batch processing reduces atomic operations overhead
 - **Fast**: Typically processes 100,000+ addresses per second on modern hardware
 
+## Installation
+
+### Prerequisites
+- [Rust](https://rustup.rs/) (install from https://rustup.rs/)
+
+### Quick Install & Run
+
+**On Windows (PowerShell/CMD):**
+```cmd
+# Build the application
+build.bat
+
+# Run it
+target\release\taproot-vanity.exe
+```
+
+**On Linux/macOS (Bash):**
+```bash
+# Build the application
+./build.sh
+
+# Run it
+./target/release/taproot-vanity
+```
+
+The build scripts will automatically check for Rust installation and build the optimized release version.
+
 ## Building
 
 ```bash

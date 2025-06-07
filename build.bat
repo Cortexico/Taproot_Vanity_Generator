@@ -23,13 +23,14 @@ if %ERRORLEVEL% EQ 0 (
     echo 📁 Executable location: target\release\taproot-vanity.exe
     echo.
     echo 🚀 Usage examples:
-    echo   target\release\taproot-vanity.exe --prefix abc
-    echo   target\release\taproot-vanity.exe --suffix xyz
-    echo   target\release\taproot-vanity.exe --prefix abc --suffix xyz
-    echo   target\release\taproot-vanity.exe --prefix abc --workers 16
+    echo   target\release\taproot-vanity.exe
+    echo   target\release\taproot-vanity.exe --min-kek-count 3
+    echo   target\release\taproot-vanity.exe --workers 16
+    echo   target\release\taproot-vanity.exe --output-file my_kek_addresses.txt
+    echo   target\release\taproot-vanity.exe --case-sensitive
     echo.
     echo 💡 For maximum performance, use all CPU cores:
-    echo   target\release\taproot-vanity.exe --prefix abc --workers %NUMBER_OF_PROCESSORS%
+    echo   target\release\taproot-vanity.exe --workers %NUMBER_OF_PROCESSORS%
     echo.
 ) else (
     echo ❌ Build failed!
